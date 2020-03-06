@@ -5,8 +5,10 @@ const port      = 3000;
 const Bitmex    = require('./Bitmex');
 const config    = require('./config');
 
-// Just a cheap and not very secure method to check the Webhook request came from our own tradingview script and not something else
-const SIGSTRING = "CHANGE_ME";      
+
+// Timer delay, to make sure multiple trades aren't fired too often. 5 second delay; see config.js.
+let timer = null;
+
 
 // Parse json body 
 app.use( express.json() );
@@ -21,46 +23,63 @@ app.get('/', (req, res) => res.status( 200 ).send('Running.'));
 // Could use hook `id` param to identify strategies (instead of "strategy" in JSON), or use to trade different mex accounts
 // but is unused here.
 app.get('/hook/:id', async ( req, res ) => {
+    
+    let trade =  { signature: "CHANGE_ME", "strategy": "my_strategy", "instrument": "XBTUSD", "side": "Sell", "entry": 1234.5 }
 
-    // let obj = req.body;
-    let obj =  { signature: "CHANGE_ME", "strategy": "my_strategy", "instrument": "XBTUSD", "side": "Sell", "entry": 1234.5 }
+    // We just got a new trade in the last few seconds, cancel the first one and reset the timer for the newest trade instead
+    if ( timer ) {        
+        console.warn( 'Too many trades received. Ignoring earliest, resetting timer.' );
+        clearTimeout( timer );
+        timer = null;
+    }
 
-    if ( obj.signature != SIGSTRING )
+    // Process this trade after a short delay
+    timer = setTimeout( process, config.TIME_OUT, trade );
+
+    res.status( 200 ).send( "Despatched" );
+
+});
+
+
+
+async function process( trade )
+{    
+
+    clearTimeout( timer );
+    timer = null;
+
+    if ( trade.signature != config.SIGNATURE_STRING )
     {
-        reject( res, 'Invalid' );
+        console.error( `Invalid signature string '${trade.signature}'` );
         return;
     }
 
-    switch( obj.strategy )
+    switch( trade.strategy )
     {
         case 'my_strategy':
 
             try {                
 
-                await make_order( obj.instrument, obj.side );
+                await make_order( trade.instrument, trade.side );
 
-                res.status( 200 ).send( 'OK' );
+                console.log( 'Success' );
                 return;
 
             } catch ( e ) {
 
                 console.error(e)
-
-                // Probably don't want to show errors publicly, so remove this after testing.
-                reject( res, e );
                 return;
 
             }
             break;
         default:
-            reject( res, 'Invalid' );
+
+            console.warn( `Unrecognized strategy '${trade.strategy}'` );
             return;            
     }
 
 
-
-});
-
+}
 
 
 async function make_order( instrument, side )
